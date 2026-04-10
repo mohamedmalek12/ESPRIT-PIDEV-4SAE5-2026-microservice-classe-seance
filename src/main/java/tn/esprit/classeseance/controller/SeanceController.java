@@ -4,6 +4,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import tn.esprit.classeseance.dto.SalleDTO;
+import tn.esprit.classeseance.dto.SeanceSaveResult;
 import tn.esprit.classeseance.dto.SeanceResponse;
 import tn.esprit.classeseance.entity.Seance;
 import tn.esprit.classeseance.service.SeanceService;
@@ -122,8 +123,11 @@ public class SeanceController {
     public ResponseEntity<?> create(@RequestBody Seance seance,
             @RequestParam(value = "classeId", required = false) Integer classeId) {
         try {
-            Seance saved = seanceService.save(seance, classeId);
-            return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(saved));
+            SeanceSaveResult result = seanceService.save(seance, classeId);
+            return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                    "seance", toResponse(result.getSeance()),
+                    "warnings", result.getWarnings()
+            ));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur"));
         }
@@ -137,8 +141,11 @@ public class SeanceController {
             @RequestBody Seance seance,
             @RequestParam(value = "classeId", required = false) Integer classeId) {
         try {
-            Seance updated = seanceService.update(id, seance, classeId);
-            return ResponseEntity.ok(updated);
+            SeanceSaveResult result = seanceService.update(id, seance, classeId);
+            return ResponseEntity.ok(Map.of(
+                    "seance", toResponse(result.getSeance()),
+                    "warnings", result.getWarnings()
+            ));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur"));
         }

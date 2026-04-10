@@ -103,4 +103,66 @@ public interface SeanceRepository extends JpaRepository<Seance, Integer> {
                         @Param("dateDebut") LocalDateTime dateDebut,
                         @Param("dateFin") LocalDateTime dateFin,
                         @Param("excludeId") Integer excludeId);
+
+        @Query("SELECT COUNT(s) FROM Seance s " +
+                        "WHERE s.classe.id = :classeId " +
+                        "AND s.dateDebut >= :startOfDay " +
+                        "AND s.dateDebut < :endOfDay")
+        long countByClasseIdInDay(
+                        @Param("classeId") Integer classeId,
+                        @Param("startOfDay") LocalDateTime startOfDay,
+                        @Param("endOfDay") LocalDateTime endOfDay);
+
+        @Query("SELECT COUNT(s) FROM Seance s " +
+                        "WHERE s.salleId = :salleId " +
+                        "AND s.dateDebut >= :startOfDay " +
+                        "AND s.dateDebut < :endOfDay")
+        long countBySalleIdInDay(
+                        @Param("salleId") Integer salleId,
+                        @Param("startOfDay") LocalDateTime startOfDay,
+                        @Param("endOfDay") LocalDateTime endOfDay);
+
+        @Query("SELECT COUNT(s) FROM Seance s " +
+                        "WHERE s.classe.id = :classeId " +
+                        "AND s.dateDebut >= :startOfDay " +
+                        "AND s.dateDebut < :endOfDay " +
+                        "AND s.id <> :excludeId")
+        long countByClasseIdInDayExcludingId(
+                        @Param("classeId") Integer classeId,
+                        @Param("startOfDay") LocalDateTime startOfDay,
+                        @Param("endOfDay") LocalDateTime endOfDay,
+                        @Param("excludeId") Integer excludeId);
+
+        @Query("SELECT COUNT(s) FROM Seance s " +
+                        "WHERE s.salleId = :salleId " +
+                        "AND s.dateDebut >= :startOfDay " +
+                        "AND s.dateDebut < :endOfDay " +
+                        "AND s.id <> :excludeId")
+        long countBySalleIdInDayExcludingId(
+                        @Param("salleId") Integer salleId,
+                        @Param("startOfDay") LocalDateTime startOfDay,
+                        @Param("endOfDay") LocalDateTime endOfDay,
+                        @Param("excludeId") Integer excludeId);
+
+        @Query("SELECT s FROM Seance s " +
+                        "WHERE s.classe.id = :classeId " +
+                        "AND s.dateDebut >= :startOfDay " +
+                        "AND s.dateDebut < :endOfDay " +
+                        "ORDER BY s.dateDebut ASC")
+        List<Seance> findByClasseIdInDay(
+                        @Param("classeId") Integer classeId,
+                        @Param("startOfDay") LocalDateTime startOfDay,
+                        @Param("endOfDay") LocalDateTime endOfDay);
+
+        @Query("SELECT s FROM Seance s " +
+                        "WHERE s.classe.id = :classeId " +
+                        "AND s.dateDebut >= :startOfDay " +
+                        "AND s.dateDebut < :endOfDay " +
+                        "AND s.id <> :excludeId " +
+                        "ORDER BY s.dateDebut ASC")
+        List<Seance> findByClasseIdInDayExcludingId(
+                        @Param("classeId") Integer classeId,
+                        @Param("startOfDay") LocalDateTime startOfDay,
+                        @Param("endOfDay") LocalDateTime endOfDay,
+                        @Param("excludeId") Integer excludeId);
 }
