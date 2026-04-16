@@ -2,10 +2,8 @@ package tn.esprit.classeseance.controller;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.*;
-import tn.esprit.classeseance.dto.SalleDTO;
-import tn.esprit.classeseance.dto.SeanceSaveResult;
-import tn.esprit.classeseance.dto.SeanceResponse;
 import tn.esprit.classeseance.entity.Seance;
 import tn.esprit.classeseance.service.SeanceService;
 import tn.esprit.classeseance.repository.SeanceRepository;
@@ -41,7 +39,7 @@ public class SeanceController {
 
         long totalSalles = 0;
         try {
-            List<SalleDTO> salles = seanceService.getAllSalles();
+            List<Map<String, Object>> salles = seanceService.getAllSalles();
             totalSalles = salles.size();
         } catch (Exception e) {
             // Ignore if service is unavailable and return 0
@@ -59,21 +57,21 @@ public class SeanceController {
     }
 
     @GetMapping("/classe/{classeId}")
-    public ResponseEntity<List<SeanceResponse>> getByClasse(@PathVariable("classeId") Integer classeId) {
+    public ResponseEntity<List<Map<String, Object>>> getByClasse(@PathVariable("classeId") Integer classeId) {
         List<Seance> list = seanceService.findByClasseId(classeId);
-        List<SeanceResponse> dtos = list.stream().map(this::toResponse).toList();
+        List<Map<String, Object>> dtos = list.stream().map(this::toResponse).toList();
         return ResponseEntity.ok(dtos);
     }
 
     /**
      * Endpoint appelé par Angular pour peupler le dropdown des salles.
-     * Appelle salles-materiels:8088 via RestTemplate en interne.
+     * Appelle salles-materiels via RPC RabbitMQ en interne.
      * GET /api/seances/salles
      */
     @GetMapping("/salles")
     public ResponseEntity<?> getSalles() {
         try {
-            List<SalleDTO> salles = seanceService.getAllSalles();
+            List<Map<String, Object>> salles = seanceService.getAllSalles();
             return ResponseEntity.ok(salles);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
@@ -123,10 +121,11 @@ public class SeanceController {
     public ResponseEntity<?> create(@RequestBody Seance seance,
             @RequestParam(value = "classeId", required = false) Integer classeId) {
         try {
-            SeanceSaveResult result = seanceService.save(seance, classeId);
+            Map<String, Object> result = seanceService.save(seance, classeId);
+            Seance saved = (Seance) result.get("seance");
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                    "seance", toResponse(result.getSeance()),
-                    "warnings", result.getWarnings()
+                    "seance", toResponse(saved),
+                    "warnings", result.getOrDefault("warnings", List.of())
             ));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur"));
@@ -141,10 +140,11 @@ public class SeanceController {
             @RequestBody Seance seance,
             @RequestParam(value = "classeId", required = false) Integer classeId) {
         try {
-            SeanceSaveResult result = seanceService.update(id, seance, classeId);
+            Map<String, Object> result = seanceService.update(id, seance, classeId);
+            Seance updated = (Seance) result.get("seance");
             return ResponseEntity.ok(Map.of(
-                    "seance", toResponse(result.getSeance()),
-                    "warnings", result.getWarnings()
+                    "seance", toResponse(updated),
+                    "warnings", result.getOrDefault("warnings", List.of())
             ));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur"));
@@ -176,29 +176,46 @@ public class SeanceController {
     public ResponseEntity<?> generateWeeklyPlanning(@PathVariable("classeId") Integer classeId) {
         try {
             List<Seance> planning = seanceService.generateWeeklyPlanning(classeId);
-            List<SeanceResponse> dtos = planning.stream().map(this::toResponse).toList();
+            List<Map<String, Object>> dtos = planning.stream().map(this::toResponse).toList();
             return ResponseEntity.ok(dtos);
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur"));
         }
     }
 
-    private SeanceResponse toResponse(Seance s) {
-        SeanceResponse r = new SeanceResponse();
-        r.setId(s.getId());
-        r.setDateDebut(s.getDateDebut());
-        r.setDateFin(s.getDateFin());
-        r.setType(s.getType());
-        r.setJour(s.getJour());
-        r.setSalleId(s.getSalleId());
+    private Map<String, Object> toResponse(Seance s) {
+        Map<String, Object> response = new java.util.HashMap<>();
+        response.put("id", s.getId());
+        response.put("dateDebut", s.getDateDebut());
+        response.put("dateFin", s.getDateFin());
+        response.put("type", s.getType());
+        response.put("jour", s.getJour());
+        response.put("salleId", s.getSalleId());
         if (s.getSalleId() != null) {
-            SalleDTO salle = seanceService.getSalleById(s.getSalleId());
-            if (salle != null) r.setSalleNom(salle.getNom());
+            Map<String, Object> salle = seanceService.getSalleById(s.getSalleId());
+            if (salle != null && salle.get("nom") != null) {
+                response.put("salleNom", salle.get("nom").toString());
+            }
         }
         if (s.getClasse() != null) {
-            r.setClasseId(s.getClasse().getId());
-            r.setClasseNom(s.getClasse().getNom());
+            response.put("classeId", s.getClasse().getId());
+            response.put("classeNom", s.getClasse().getNom());
         }
-        return r;
+        return response;
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, String>> handleBadRequest(HttpMessageNotReadableException e) {
+        String msg = e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage()
+                : "Corps de requête invalide (dateDebut, dateFin au format ISO, type: PRESENTIEL ou EN_LIGNE)";
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", msg));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, String>> handleException(Exception e) {
+        e.printStackTrace();
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur serveur"));
     }
 }

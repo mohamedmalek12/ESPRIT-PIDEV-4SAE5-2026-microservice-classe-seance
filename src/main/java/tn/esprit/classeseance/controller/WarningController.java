@@ -8,8 +8,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import tn.esprit.classeseance.dto.WarningEventDto;
-import tn.esprit.classeseance.dto.WarningIngestRequest;
 import tn.esprit.classeseance.service.SeanceService;
 
 import java.util.List;
@@ -27,7 +25,7 @@ public class WarningController {
     }
 
     @GetMapping
-    public ResponseEntity<List<WarningEventDto>> getRecent() {
+    public ResponseEntity<List<Map<String, Object>>> getRecent() {
         return ResponseEntity.ok(seanceService.getRecentWarnings());
     }
 
@@ -38,11 +36,25 @@ public class WarningController {
     }
 
     @PostMapping("/ingest")
-    public ResponseEntity<Map<String, Boolean>> ingest(@RequestBody WarningIngestRequest body) {
-        if (body == null || body.getMessages() == null || body.getMessages().isEmpty()) {
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<Map<String, Boolean>> ingest(@RequestBody Map<String, Object> body) {
+        List<String> messages = null;
+        String source = null;
+        if (body != null) {
+            Object sourceObj = body.get("source");
+            source = sourceObj != null ? sourceObj.toString() : null;
+            Object messagesObj = body.get("messages");
+            if (messagesObj instanceof List<?> rawMessages) {
+                messages = rawMessages.stream()
+                        .filter(item -> item != null)
+                        .map(Object::toString)
+                        .toList();
+            }
+        }
+        if (messages == null || messages.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("accepted", false));
         }
-        seanceService.publishExternalWarnings(body.getSource(), body.getMessages());
+        seanceService.publishExternalWarnings(source, messages);
         return ResponseEntity.ok(Map.of("accepted", true));
     }
 }

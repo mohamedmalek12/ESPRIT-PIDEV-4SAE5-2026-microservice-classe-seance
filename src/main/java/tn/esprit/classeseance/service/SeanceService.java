@@ -1,107 +1,119 @@
 package tn.esprit.classeseance.service;
 
+import org.springframework.amqp.AmqpException;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.util.UriComponentsBuilder;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
-import tn.esprit.classeseance.dto.SalleDTO;
-import tn.esprit.classeseance.dto.SeanceSaveResult;
-import tn.esprit.classeseance.dto.WarningEventDto;
+import tn.esprit.classeseance.integration.IntegrationQueues;
 import tn.esprit.classeseance.entity.Classe;
 import tn.esprit.classeseance.entity.Seance;
+import tn.esprit.classeseance.entity.WarningEventEntity;
 import tn.esprit.classeseance.repository.ClasseRepository;
 import tn.esprit.classeseance.repository.SeanceRepository;
+import tn.esprit.classeseance.repository.WarningEventRepository;
 
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.UUID;
 
 @Service
 public class SeanceService {
 
-    private static final String SALLES_URL = "http://localhost:8088/api/salles";
-    private static final String MATERIELS_URL = "http://localhost:8088/api/materiels";
     private static final String STOMP_TOPIC_WARNINGS = "/topic/warnings";
     private static final int MAX_STORED_WARNINGS = 500;
 
     private final SeanceRepository seanceRepository;
     private final ClasseRepository classeRepository;
     private final SimpMessagingTemplate messagingTemplate;
-
-    private final List<WarningEventDto> recentWarnings = new ArrayList<>();
-    private final ReentrantReadWriteLock warningsLock = new ReentrantReadWriteLock();
-
-    // RestTemplate natif Spring — aucune dépendance supplémentaire
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final WarningEventRepository warningEventRepository;
+    private final RabbitTemplate rabbitTemplate;
 
     public SeanceService(SeanceRepository seanceRepository,
             ClasseRepository classeRepository,
-            SimpMessagingTemplate messagingTemplate) {
+            SimpMessagingTemplate messagingTemplate,
+            WarningEventRepository warningEventRepository,
+            RabbitTemplate rabbitTemplate) {
         this.seanceRepository = seanceRepository;
         this.classeRepository = classeRepository;
         this.messagingTemplate = messagingTemplate;
+        this.warningEventRepository = warningEventRepository;
+        this.rabbitTemplate = rabbitTemplate;
     }
 
-    /** For GET /api/warnings */
-    public List<WarningEventDto> getRecentWarnings() {
-        warningsLock.readLock().lock();
-        try {
-            return Collections.unmodifiableList(new ArrayList<>(recentWarnings));
-        } finally {
-            warningsLock.readLock().unlock();
-        }
+    /** For GET /api/warnings — persisted in MySQL (last 500 by time). */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getRecentWarnings() {
+        return warningEventRepository.findTop500ByOrderByTimestampDesc().stream()
+                .map(WarningEventEntity::toMap)
+                .toList();
     }
 
     /** For DELETE /api/warnings */
+    @Transactional
     public void clearWarningsHistory() {
-        warningsLock.writeLock().lock();
-        try {
-            recentWarnings.clear();
-        } finally {
-            warningsLock.writeLock().unlock();
-        }
+        warningEventRepository.deleteAllWarnings();
     }
 
     private void publishSessionWarningsToStomp(Integer seanceId, List<String> messages) {
         if (messages == null || messages.isEmpty()) {
             return;
         }
-        WarningEventDto event = WarningEventDto.ofSession(seanceId, List.copyOf(messages));
+        WarningEventMessage event = buildWarningEvent("SESSION", seanceId, List.copyOf(messages));
         storeAndBroadcast(event);
     }
 
     /**
      * Ingest warnings from other apps (e.g. material stock on port 8088) and broadcast like session warnings.
      */
+    @Transactional
     public void publishExternalWarnings(String source, List<String> messages) {
         if (messages == null || messages.isEmpty()) {
             return;
         }
-        WarningEventDto event = WarningEventDto.ofExternal(source, List.copyOf(messages));
+        String eventSource = source != null && !source.isBlank() ? source : "APP";
+        WarningEventMessage event = buildWarningEvent(eventSource, null, List.copyOf(messages));
         storeAndBroadcast(event);
     }
 
-    private void storeAndBroadcast(WarningEventDto event) {
+    private void storeAndBroadcast(WarningEventMessage event) {
+        warningEventRepository.save(WarningEventEntity.fromMap(event.toMap()));
+        enforceMaxStoredWarnings();
         messagingTemplate.convertAndSend(STOMP_TOPIC_WARNINGS, event);
-        warningsLock.writeLock().lock();
-        try {
-            recentWarnings.add(0, event);
-            while (recentWarnings.size() > MAX_STORED_WARNINGS) {
-                recentWarnings.remove(recentWarnings.size() - 1);
-            }
-        } finally {
-            warningsLock.writeLock().unlock();
+    }
+
+    private static WarningEventMessage buildWarningEvent(String source, Integer seanceId, List<String> messages) {
+        return new WarningEventMessage(
+                UUID.randomUUID().toString(),
+                Instant.now(),
+                source,
+                "WARNING",
+                messages,
+                seanceId);
+    }
+
+    /**
+     * Keeps at most {@link #MAX_STORED_WARNINGS} rows (oldest removed first).
+     */
+    private void enforceMaxStoredWarnings() {
+        long count = warningEventRepository.count();
+        if (count <= MAX_STORED_WARNINGS) {
+            return;
+        }
+        int excess = (int) (count - MAX_STORED_WARNINGS);
+        List<String> oldestIds = warningEventRepository.findIdsOldestFirst(PageRequest.of(0, excess));
+        if (!oldestIds.isEmpty()) {
+            warningEventRepository.deleteAllByIdInBatch(oldestIds);
         }
     }
 
@@ -122,34 +134,58 @@ public class SeanceService {
     }
 
     /**
-     * Récupère toutes les salles depuis salles-materiels via RestTemplate.
-     * Appelé par le controller pour peupler le dropdown Angular.
+     * Récupère toutes les salles depuis salles-materiels via RPC RabbitMQ.
      */
-    public List<SalleDTO> getAllSalles() {
-        SalleDTO[] salles = restTemplate.getForObject(SALLES_URL, SalleDTO[].class);
-        return salles != null ? Arrays.asList(salles) : List.of();
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getAllSalles() {
+        Object reply = rabbitTemplate.convertSendAndReceive(
+                "", IntegrationQueues.SALLE_RPC, Map.of("action", "all"));
+        if (!(reply instanceof Map<?, ?> response)) {
+            return List.of();
+        }
+        Object salles = response.get("salles");
+        if (!(salles instanceof List<?> list)) {
+            return List.of();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object entry : list) {
+            if (entry instanceof Map<?, ?> mapEntry) {
+                result.add((Map<String, Object>) mapEntry);
+            }
+        }
+        return result;
     }
 
     /**
-     * Récupère une salle par ID depuis salles-materiels via RestTemplate.
-     * @return la salle ou null si service indisponible / non trouvée
+     * Récupère une salle par ID depuis salles-materiels via RPC RabbitMQ.
+     *
+     * @return la salle ou null si indisponible / non trouvée
      */
-    public SalleDTO getSalleById(Integer id) {
-        try {
-            return restTemplate.getForObject(SALLES_URL + "/" + id, SalleDTO.class);
-        } catch (RestClientException e) {
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getSalleById(Integer id) {
+        if (id == null || id <= 0) {
             return null;
         }
+        Object reply = rabbitTemplate.convertSendAndReceive(
+                "", IntegrationQueues.SALLE_RPC, Map.of("action", "byId", "id", id));
+        if (!(reply instanceof Map<?, ?> response)) {
+            return null;
+        }
+        Object salle = response.get("salle");
+        if (!(salle instanceof Map<?, ?> salleMap)) {
+            return null;
+        }
+        return (Map<String, Object>) salleMap;
     }
 
     @Transactional
-    public SeanceSaveResult save(Seance seance, Integer classeId) {
+    public Map<String, Object> save(Seance seance, Integer classeId) {
         List<String> errors = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
 
         // 1. Vérifier que la salle existe dans l'autre microservice
         if (seance.getSalleId() != null) {
-            SalleDTO salle = getSalleById(seance.getSalleId());
+            Map<String, Object> salle = getSalleById(seance.getSalleId());
             if (salle == null) {
                 errors.add("Room not found with id: " + seance.getSalleId());
             } else {
@@ -159,7 +195,7 @@ public class SeanceService {
                         seance.getDateDebut(),
                         seance.getDateFin());
                 if (occupee) {
-                    errors.add("The room '" + salle.getNom() + "' is already occupied for this time slot.");
+                    errors.add("The room '" + getSalleNom(salle) + "' is already occupied for this time slot.");
                 }
             }
         }
@@ -196,11 +232,11 @@ public class SeanceService {
         Seance saved = seanceRepository.save(seance);
         addMaintenanceWarningsForSeance(saved, warnings);
         publishSessionWarningsToStomp(saved.getId(), warnings);
-        return new SeanceSaveResult(saved, warnings);
+        return Map.of("seance", saved, "warnings", warnings);
     }
 
     @Transactional
-    public SeanceSaveResult update(Integer id, Seance seance, Integer classeId) {
+    public Map<String, Object> update(Integer id, Seance seance, Integer classeId) {
         return seanceRepository.findById(id)
                 .map(existing -> {
                     List<String> errors = new ArrayList<>();
@@ -208,7 +244,7 @@ public class SeanceService {
 
                     // Vérifier disponibilité salle si elle a changé
                     if (seance.getSalleId() != null) {
-                        SalleDTO salle = getSalleById(seance.getSalleId());
+                        Map<String, Object> salle = getSalleById(seance.getSalleId());
                         if (salle == null) {
                             errors.add("Room not found with id: " + seance.getSalleId());
                         } else {
@@ -219,7 +255,7 @@ public class SeanceService {
                                     id);
                             if (occupee) {
                                 errors.add(
-                                        "The room '" + salle.getNom() + "' is already occupied for this time slot.");
+                                        "The room '" + getSalleNom(salle) + "' is already occupied for this time slot.");
                             } else {
                                 existing.setSalleId(seance.getSalleId());
                             }
@@ -263,7 +299,7 @@ public class SeanceService {
                     Seance updated = seanceRepository.save(existing);
                     addMaintenanceWarningsForSeance(updated, warnings);
                     publishSessionWarningsToStomp(updated.getId(), warnings);
-                    return new SeanceSaveResult(updated, warnings);
+                    return Map.of("seance", updated, "warnings", warnings);
                 })
                 .orElseThrow(() -> new RuntimeException("Session not found with id: " + id));
     }
@@ -389,14 +425,23 @@ public class SeanceService {
                     ? seanceRepository.countBySalleIdInDay(seance.getSalleId(), startOfDay, endOfDay)
                     : seanceRepository.countBySalleIdInDayExcludingId(seance.getSalleId(), startOfDay, endOfDay, excludeId);
             if (salleCount >= 2) {
-                SalleDTO salle = getSalleById(seance.getSalleId());
-                String roomName = (salle != null && salle.getNom() != null && !salle.getNom().isBlank())
-                        ? salle.getNom()
+                Map<String, Object> salle = getSalleById(seance.getSalleId());
+                String salleNom = getSalleNom(salle);
+                String roomName = (salleNom != null && !salleNom.isBlank())
+                        ? salleNom
                         : "this room";
                 errors.add("There are already 2 sessions scheduled in room '" + roomName + "' today.");
             }
         }
 
+    }
+
+    private static String getSalleNom(Map<String, Object> salle) {
+        if (salle == null) {
+            return null;
+        }
+        Object value = salle.get("nom");
+        return value != null ? value.toString() : null;
     }
 
     private static boolean startsBefore08(Seance s) {
@@ -446,14 +491,14 @@ public class SeanceService {
         double durationHours = durationMinutes / 60.0;
 
         try {
-            String url = UriComponentsBuilder.fromUriString(MATERIELS_URL + "/usage/salle/{salleId}")
-                    .queryParam("hours", durationHours)
-                    .buildAndExpand(seance.getSalleId())
-                    .toUriString();
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> response = restTemplate.postForObject(url, null, Map.class);
-            if (response == null) {
+            Map<String, Object> request = new HashMap<>();
+            request.put("salleId", seance.getSalleId());
+            request.put("hours", durationHours);
+            Object reply = rabbitTemplate.convertSendAndReceive("", IntegrationQueues.MATERIEL_USAGE_RPC, request);
+            if (!(reply instanceof Map<?, ?> response)) {
+                return;
+            }
+            if (Boolean.TRUE.equals(response.get("invalidHours")) || Boolean.TRUE.equals(response.get("error"))) {
                 return;
             }
             Object alertObj = response.get("warnings");
@@ -464,10 +509,69 @@ public class SeanceService {
                     }
                 }
             }
-        } catch (RestClientException e) {
-            // Service externe indisponible : ne pas polluer l'UI avec une alerte technique.
+        } catch (AmqpException e) {
+            // Broker ou salles-materiels indisponible : pas d'alerte technique côté UI.
         } catch (RuntimeException e) {
-            // Erreur technique inattendue : ne pas afficher d'alerte si la séance est créée/modifiée correctement.
+            // Erreur de désérialisation ou autre : ignorer.
+        }
+    }
+
+    private static final class WarningEventMessage {
+        private final String id;
+        private final Instant timestamp;
+        private final String source;
+        private final String severity;
+        private final List<String> messages;
+        private final Integer seanceId;
+
+        private WarningEventMessage(
+                String id,
+                Instant timestamp,
+                String source,
+                String severity,
+                List<String> messages,
+                Integer seanceId) {
+            this.id = id;
+            this.timestamp = timestamp;
+            this.source = source;
+            this.severity = severity;
+            this.messages = messages;
+            this.seanceId = seanceId;
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        public Instant getTimestamp() {
+            return timestamp;
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public String getSeverity() {
+            return severity;
+        }
+
+        public List<String> getMessages() {
+            return messages;
+        }
+
+        public Integer getSeanceId() {
+            return seanceId;
+        }
+
+        private Map<String, Object> toMap() {
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", id);
+            map.put("timestamp", timestamp);
+            map.put("source", source);
+            map.put("severity", severity);
+            map.put("messages", messages);
+            map.put("seanceId", seanceId);
+            return map;
         }
     }
 }
