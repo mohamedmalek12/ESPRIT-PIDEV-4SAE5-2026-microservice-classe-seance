@@ -1,7 +1,6 @@
 package tn.esprit.classeseance.controller;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,7 +14,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/warnings")
-@CrossOrigin(origins = "*")
 public class WarningController {
 
     private final SeanceService seanceService;
