@@ -35,7 +35,7 @@ class SeanceControllerTest {
     private SeanceService seanceService;
 
     @MockBean
-    private SeanceRepository seanceRepository; // Nécessaire car injecté dans le Controller
+    private SeanceRepository seanceRepository;
 
     @Test
     void getAll_returnsOkAndJsonArray() throws Exception {
@@ -84,7 +84,6 @@ class SeanceControllerTest {
 
         when(seanceService.save(any(Seance.class), eq(null))).thenReturn(serviceResult);
 
-        // JSON d'une séance valide
         String seanceJson = """
             {
                 "dateDebut": "2026-05-10T09:00:00",
@@ -138,7 +137,7 @@ class SeanceControllerTest {
     @Test
     void getStats_returnsOkWithStats() throws Exception {
         when(seanceService.countClasses()).thenReturn(10L);
-        when(seanceService.getAllSalles()).thenReturn(List.of(new HashMap<>(), new HashMap<>())); // 2 salles
+        when(seanceService.getAllSalles()).thenReturn(List.of(new HashMap<>(), new HashMap<>()));
 
         mockMvc.perform(get("/api/seances/stats"))
                 .andExpect(status().isOk())
