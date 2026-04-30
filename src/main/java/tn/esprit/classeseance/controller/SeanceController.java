@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.NoSuchElementException;
 
 @RestController
 @RequestMapping("/api/seances")
@@ -47,7 +48,7 @@ public class SeanceController {
         try {
             List<Map<String, Object>> salles = seanceService.getAllSalles();
             totalSalles = salles.size();
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             // Ignore if service is unavailable
         }
         stats.put("totalSalles", totalSalles);
@@ -75,7 +76,7 @@ public class SeanceController {
         try {
             List<Map<String, Object>> salles = seanceService.getAllSalles();
             return ResponseEntity.ok(salles);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body("Service salles-materiels indisponible : " + e.getMessage());
         }
@@ -119,7 +120,7 @@ public class SeanceController {
                     SEANCE_KEY, toResponse(saved),
                     WARNINGS_KEY, result.getOrDefault(WARNINGS_KEY, List.of())
             ));
-        } catch (RuntimeException e) {
+        } catch (IllegalArgumentException e) {
             String errorMsg = (e.getMessage() != null) ? e.getMessage() : ERREUR_LABEL;
             return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, errorMsg));
         }
@@ -136,7 +137,7 @@ public class SeanceController {
                     SEANCE_KEY, toResponse(updated),
                     WARNINGS_KEY, result.getOrDefault(WARNINGS_KEY, List.of())
             ));
-        } catch (RuntimeException e) {
+        } catch (IllegalArgumentException e) {
             String errorMsg = (e.getMessage() != null) ? e.getMessage() : ERREUR_LABEL;
             return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, errorMsg));
         }
@@ -148,7 +149,7 @@ public class SeanceController {
         try {
             Seance updated = seanceService.assignerClasse(seanceId, classeId);
             return ResponseEntity.ok(updated);
-        } catch (RuntimeException e) {
+        } catch (NoSuchElementException e) {
             return ResponseEntity.notFound().build();
         }
     }
@@ -158,7 +159,7 @@ public class SeanceController {
         try {
             seanceService.deleteById(id);
             return ResponseEntity.noContent().build();
-        } catch (RuntimeException e) {
+        } catch (NoSuchElementException e) {
             return ResponseEntity.notFound().build();
         }
     }
@@ -169,7 +170,7 @@ public class SeanceController {
             List<Seance> planning = seanceService.generateWeeklyPlanning(classeId);
             List<Map<String, Object>> dtos = planning.stream().map(this::toResponse).toList();
             return ResponseEntity.ok(dtos);
-        } catch (RuntimeException e) {
+        } catch (IllegalArgumentException e) {
             String errorMsg = (e.getMessage() != null) ? e.getMessage() : ERREUR_LABEL;
             return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, errorMsg));
         }
@@ -206,8 +207,8 @@ public class SeanceController {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(MESSAGE_KEY, msg));
     }
 
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, String>> handleException(Exception e) {
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<Map<String, String>> handleException(RuntimeException e) {
         String errorMsg = (e.getMessage() != null) ? e.getMessage() : "Erreur serveur";
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)

@@ -6,6 +6,7 @@ import tn.esprit.classeseance.entity.Classe;
 import tn.esprit.classeseance.repository.ClasseRepository;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 @Service
@@ -37,13 +38,13 @@ public class ClasseService {
                     existing.setNom(classe.getNom());
                     return classeRepository.save(existing);
                 })
-                .orElseThrow(() -> new RuntimeException("Classe non trouvée avec l'id : " + id));
+                .orElseThrow(() -> new NoSuchElementException("Classe non trouvée avec l'id : " + id));
     }
 
     @Transactional
     public void deleteById(Integer id) {
         if (!classeRepository.existsById(id)) {
-            throw new RuntimeException("Classe non trouvée avec l'id : " + id);
+            throw new NoSuchElementException("Classe non trouvée avec l'id : " + id);
         }
         classeRepository.deleteById(id);
     }

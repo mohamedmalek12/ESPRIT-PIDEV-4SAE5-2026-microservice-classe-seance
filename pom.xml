@@ -24,7 +24,6 @@
 		<java.version>17</java.version>
 		<lombok.version>1.18.28</lombok.version>
 		<spring-cloud.version>2022.0.5</spring-cloud.version>
-		<sonar.coverage.exclusions>**/entity/**, **/config/**</sonar.coverage.exclusions>
 		<sonar.coverage.exclusions>**/entity/**/*.java, **/config/**/*.java, **/integration/**/*.java</sonar.coverage.exclusions>
 	</properties>
 

@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -226,7 +227,7 @@ public class SeanceService {
         validateDailyLimitsAndWarnings(seance, classeId, null, errors, warnings);
 
         if (!errors.isEmpty()) {
-            throw new RuntimeException(String.join("\n", errors));
+            throw new IllegalArgumentException(String.join("\n", errors));
         }
 
         Seance saved = seanceRepository.save(seance);
@@ -293,7 +294,7 @@ public class SeanceService {
                     validateDailyLimitsAndWarnings(existing, effectiveClasseId, id, errors, warnings);
 
                     if (!errors.isEmpty()) {
-                        throw new RuntimeException(String.join("\n", errors));
+                        throw new IllegalArgumentException(String.join("\n", errors));
                     }
 
                     Seance updated = seanceRepository.save(existing);
@@ -301,15 +302,15 @@ public class SeanceService {
                     publishSessionWarningsToStomp(updated.getId(), warnings);
                     return Map.of("seance", updated, "warnings", warnings);
                 })
-                .orElseThrow(() -> new RuntimeException("Session not found with id: " + id));
+                .orElseThrow(() -> new NoSuchElementException("Session not found with id: " + id));
     }
 
     @Transactional
     public Seance assignerClasse(Integer seanceId, Integer classeId) {
         Seance seance = seanceRepository.findById(seanceId)
-                .orElseThrow(() -> new RuntimeException("Session not found with id: " + seanceId));
+                .orElseThrow(() -> new NoSuchElementException("Session not found with id: " + seanceId));
         Classe classe = classeRepository.findById(classeId)
-                .orElseThrow(() -> new RuntimeException("Class not found with id: " + classeId));
+                .orElseThrow(() -> new NoSuchElementException("Class not found with id: " + classeId));
         seance.setClasse(classe);
         return seanceRepository.save(seance);
     }
@@ -317,7 +318,7 @@ public class SeanceService {
     @Transactional
     public void deleteById(Integer id) {
         if (!seanceRepository.existsById(id)) {
-            throw new RuntimeException("Session not found with id: " + id);
+            throw new NoSuchElementException("Session not found with id: " + id);
         }
         seanceRepository.deleteById(id);
     }
@@ -325,7 +326,7 @@ public class SeanceService {
     @Transactional
     public List<Seance> generateWeeklyPlanning(Integer classeId) {
         Classe classe = classeRepository.findById(classeId)
-                .orElseThrow(() -> new RuntimeException("Class not found with id: " + classeId));
+                .orElseThrow(() -> new NoSuchElementException("Class not found with id: " + classeId));
 
         java.time.LocalDate nextMonday = java.time.LocalDate.now()
                 .with(java.time.temporal.TemporalAdjusters.next(java.time.DayOfWeek.MONDAY));
@@ -511,7 +512,7 @@ public class SeanceService {
             }
         } catch (AmqpException e) {
             // Broker ou salles-materiels indisponible : pas d'alerte technique côté UI.
-        } catch (RuntimeException e) {
+        } catch (ClassCastException e) {
             // Erreur de désérialisation ou autre : ignorer.
         }
     }
