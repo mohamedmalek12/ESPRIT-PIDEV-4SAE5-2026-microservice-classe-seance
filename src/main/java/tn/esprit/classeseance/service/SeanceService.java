@@ -157,11 +157,7 @@ public class SeanceService {
         return result;
     }
 
-    /**
-     * Récupère une salle par ID depuis salles-materiels via RPC RabbitMQ.
-     *
-     * @return la salle ou null si indisponible / non trouvée
-     */
+
     @SuppressWarnings("unchecked")
     public Map<String, Object> getSalleById(Integer id) {
         if (id == null || id <= 0) {
