@@ -38,7 +38,8 @@ pipeline {
                     sh """
                         mvn sonar:sonar \
                             -Dsonar.projectKey=${IMAGE_NAME} \
-                            -Dsonar.projectName=${IMAGE_NAME}
+                            -Dsonar.projectName=${IMAGE_NAME} \
+                            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
                     """
                 }
             }
