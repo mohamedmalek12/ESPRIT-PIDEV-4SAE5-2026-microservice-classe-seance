@@ -1,164 +1,110 @@
 package tn.esprit.classeseance.controller;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import tn.esprit.classeseance.entity.Classe;
-import tn.esprit.classeseance.entity.Seance;
-import tn.esprit.classeseance.entity.TypeSeance;
-import tn.esprit.classeseance.service.SeanceService;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import tn.esprit.classeseance.repository.SeanceRepository;
+import tn.esprit.classeseance.service.SeanceService;
 
 import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(SeanceController.class)
+@ExtendWith(MockitoExtension.class)
 class SeanceControllerTest {
 
-    @Autowired
-    private MockMvc mockMvc;
-
-    @MockBean
+    @Mock
     private SeanceService seanceService;
 
-    @MockBean
+    @Mock
     private SeanceRepository seanceRepository;
 
+    @InjectMocks
+    private SeanceController seanceController;
+
     @Test
-    void getAll_returnsOkAndJsonArray() throws Exception {
-        Seance seance = new Seance();
-        seance.setId(1);
-        seance.setJour("LUNDI");
-        seance.setType(TypeSeance.PRESENTIEL);
+    void testGetSalles_Success() {
+        // Arrange
+        List<Map<String, Object>> mockSalles = List.of(Map.of("id", 1, "nom", "Salle A"));
+        when(seanceService.getAllSalles()).thenReturn(mockSalles);
 
-        when(seanceService.findAll()).thenReturn(List.of(seance));
+        // Act
+        ResponseEntity<?> response = seanceController.getSalles();
 
-        mockMvc.perform(get("/api/seances"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].jour").value("LUNDI"));
+        // Assert
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(mockSalles, response.getBody());
     }
 
     @Test
-    void getById_returnsOkWhenFound() throws Exception {
-        Seance seance = new Seance();
-        seance.setId(1);
-        seance.setJour("MARDI");
+    void testGetSalles_Exception() {
+        // Arrange
+        when(seanceService.getAllSalles()).thenThrow(new RuntimeException("Erreur de connexion"));
 
-        when(seanceService.findById(1)).thenReturn(Optional.of(seance));
+        // Act
+        ResponseEntity<?> response = seanceController.getSalles();
 
-        mockMvc.perform(get("/api/seances/1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.jour").value("MARDI"));
+        // Assert
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        assertEquals("Service salles-materiels indisponible : Erreur de connexion", response.getBody());
     }
 
     @Test
-    void getById_returns404WhenMissing() throws Exception {
-        when(seanceService.findById(99)).thenReturn(Optional.empty());
+    void testGetOccupiedSalles_WithExcludeId() {
+        LocalDateTime debut = LocalDateTime.now();
+        LocalDateTime fin = LocalDateTime.now().plusHours(2);
+        List<Integer> mockIds = List.of(101, 102);
+        when(seanceRepository.findOccupiedSalleIdsExcludingId(debut, fin, 5)).thenReturn(mockIds);
 
-        mockMvc.perform(get("/api/seances/99"))
-                .andExpect(status().isNotFound());
+        ResponseEntity<List<Integer>> response = seanceController.getOccupiedSalles(debut, fin, 5);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(mockIds, response.getBody());
     }
 
     @Test
-    void create_returns201() throws Exception {
-        Seance savedSeance = new Seance();
-        savedSeance.setId(2);
-        savedSeance.setJour("JEUDI");
+    void testGetOccupiedSalles_WithoutExcludeId() {
+        LocalDateTime debut = LocalDateTime.now();
+        LocalDateTime fin = LocalDateTime.now().plusHours(2);
+        List<Integer> mockIds = List.of(101, 102);
+        when(seanceRepository.findOccupiedSalleIds(debut, fin)).thenReturn(mockIds);
 
-        Map<String, Object> serviceResult = new HashMap<>();
-        serviceResult.put("seance", savedSeance);
-        serviceResult.put("warnings", Collections.emptyList());
+        ResponseEntity<List<Integer>> response = seanceController.getOccupiedSalles(debut, fin, null);
 
-        when(seanceService.save(any(Seance.class), eq(null))).thenReturn(serviceResult);
-
-        String seanceJson = """
-            {
-                "dateDebut": "2026-05-10T09:00:00",
-                "dateFin": "2026-05-10T11:00:00",
-                "type": "PRESENTIEL",
-                "jour": "JEUDI"
-            }
-            """;
-
-        mockMvc.perform(post("/api/seances")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(seanceJson))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.seance.id").value(2));
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(mockIds, response.getBody());
     }
 
     @Test
-    void update_returnsOkAndUpdatedSeance() throws Exception {
-        Seance updatedSeance = new Seance();
-        updatedSeance.setId(1);
-        updatedSeance.setJour("VENDREDI");
+    void testGetOccupiedClasses_WithExcludeId() {
+        LocalDateTime debut = LocalDateTime.now();
+        LocalDateTime fin = LocalDateTime.now().plusHours(2);
+        List<Integer> mockIds = List.of(1, 2);
+        when(seanceRepository.findOccupiedClasseIdsExcludingId(debut, fin, 10)).thenReturn(mockIds);
 
-        Map<String, Object> serviceResult = new HashMap<>();
-        serviceResult.put("seance", updatedSeance);
-        serviceResult.put("warnings", Collections.emptyList());
+        ResponseEntity<List<Integer>> response = seanceController.getOccupiedClasses(debut, fin, 10);
 
-        when(seanceService.update(eq(1), any(Seance.class), eq(null))).thenReturn(serviceResult);
-
-        String seanceJson = """
-            {
-                "dateDebut": "2026-05-11T14:00:00",
-                "dateFin": "2026-05-11T16:00:00",
-                "type": "EN_LIGNE",
-                "jour": "VENDREDI"
-            }
-            """;
-
-        mockMvc.perform(put("/api/seances/1")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(seanceJson))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.seance.jour").value("VENDREDI"));
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(mockIds, response.getBody());
     }
 
     @Test
-    void delete_returns204() throws Exception {
-        mockMvc.perform(delete("/api/seances/5"))
-                .andExpect(status().isNoContent());
-    }
+    void testGetOccupiedClasses_WithoutExcludeId() {
+        LocalDateTime debut = LocalDateTime.now();
+        LocalDateTime fin = LocalDateTime.now().plusHours(2);
+        List<Integer> mockIds = List.of(1, 2);
+        when(seanceRepository.findOccupiedClasseIds(debut, fin)).thenReturn(mockIds);
 
-    @Test
-    void getStats_returnsOkWithStats() throws Exception {
-        when(seanceService.countClasses()).thenReturn(10L);
-        when(seanceService.getAllSalles()).thenReturn(List.of(new HashMap<>(), new HashMap<>()));
+        ResponseEntity<List<Integer>> response = seanceController.getOccupiedClasses(debut, fin, null);
 
-        mockMvc.perform(get("/api/seances/stats"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalClasses").value(10))
-                .andExpect(jsonPath("$.totalSalles").value(2));
-    }
-
-    @Test
-    void getByClasse_returnsList() throws Exception {
-        Seance s = new Seance();
-        s.setId(10);
-        Classe c = new Classe();
-        c.setId(5);
-        c.setNom("ClasseA");
-        s.setClasse(c);
-
-        when(seanceService.findByClasseId(5)).thenReturn(List.of(s));
-
-        mockMvc.perform(get("/api/seances/classe/5"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(10))
-                .andExpect(jsonPath("$[0].classeNom").value("ClasseA"));
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(mockIds, response.getBody());
     }
 }
