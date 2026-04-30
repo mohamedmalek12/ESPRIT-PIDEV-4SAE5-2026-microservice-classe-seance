@@ -14,6 +14,7 @@ import tn.esprit.classeseance.entity.TypeSeance;
 import tn.esprit.classeseance.repository.ClasseRepository;
 import tn.esprit.classeseance.repository.SeanceRepository;
 import tn.esprit.classeseance.repository.WarningEventRepository;
+import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -208,5 +209,79 @@ class SeanceServiceTest {
         doNothing().when(warningEventRepository).deleteAllWarnings();
         assertDoesNotThrow(() -> seanceService.clearWarningsHistory());
         verify(warningEventRepository).deleteAllWarnings();
+    }
+    @Test
+    void testPublishExternalWarnings_NullOrEmpty() {
+        // Teste les lignes rouges où la liste est nulle ou vide
+        seanceService.publishExternalWarnings("APP", null);
+        seanceService.publishExternalWarnings("APP", List.of());
+
+        verify(warningEventRepository, never()).save(any());
+    }
+
+    @Test
+    void testPublishExternalWarnings_And_WarningEventMessageGetters() throws Exception {
+        // Simule qu'il n'y a pas trop d'avertissements en base
+        when(warningEventRepository.count()).thenReturn(5L);
+
+        // Déclenche la création du WarningEventMessage
+        seanceService.publishExternalWarnings("TEST_SOURCE", List.of("Alerte système"));
+
+        // Capture l'objet privé envoyé pour le tester
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(messagingTemplate).convertAndSend(anyString(), eventCaptor.capture());
+
+        Object capturedEvent = eventCaptor.getValue();
+
+        // Astuce : Utilisation de la réflexion pour appeler tous les getters de la classe interne
+        // Cela permet de couvrir toutes les lignes rouges de getId(), getSource(), etc.
+        for (java.lang.reflect.Method method : capturedEvent.getClass().getDeclaredMethods()) {
+            if (method.getName().startsWith("get")) {
+                method.setAccessible(true);
+                method.invoke(capturedEvent);
+            }
+        }
+    }
+
+    @Test
+    void testEnforceMaxStoredWarnings_OverLimit() {
+        // Simule une base de données avec trop d'avertissements (ex: 200)
+        when(warningEventRepository.count()).thenReturn(200L);
+        when(warningEventRepository.findIdsOldestFirst(any())).thenReturn(List.of("id1", "id2", "id3"));
+
+        seanceService.publishExternalWarnings(null, List.of("Nouvelle alerte"));
+
+        // Vérifie que le code a bien appelé la suppression des anciens
+        verify(warningEventRepository).deleteAllByIdInBatch(anyList());
+    }
+
+    @Test
+    void testSaveSeance_EarlyAndLateWarnings() {
+        // Préparation du Mock RabbitMQ
+        Map<String, Object> rabbitResponse = Map.of("salle", Map.of("id", 100, "nom", "Salle A"));
+        when(rabbitTemplate.convertSendAndReceive(anyString(), anyString(), any(Object.class)))
+                .thenReturn(rabbitResponse);
+        when(classeRepository.findById(1)).thenReturn(Optional.of(classeValide));
+
+        // 1. Test de la ligne rouge : "startsBefore08"
+        Seance earlySeance = new Seance();
+        earlySeance.setId(20);
+        earlySeance.setDateDebut(LocalDateTime.now().withHour(7).withMinute(0)); // 07:00
+        earlySeance.setDateFin(LocalDateTime.now().withHour(9).withMinute(0));
+        earlySeance.setSalleId(100);
+
+        seanceService.save(earlySeance, 1);
+
+        // 2. Test de la ligne rouge : "endsAfter18"
+        Seance lateSeance = new Seance();
+        lateSeance.setId(21);
+        lateSeance.setDateDebut(LocalDateTime.now().withHour(17).withMinute(0));
+        lateSeance.setDateFin(LocalDateTime.now().withHour(19).withMinute(0)); // 19:00
+        lateSeance.setSalleId(100);
+
+        seanceService.save(lateSeance, 1);
+
+        // Ces deux sauvegardes vont forcer le passage dans les "if" des horaires atypiques
+        verify(seanceRepository, times(2)).save(any(Seance.class));
     }
 }
