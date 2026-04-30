@@ -11,10 +11,17 @@ import org.springframework.format.annotation.DateTimeFormat;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 
 @RestController
 @RequestMapping("/api/seances")
 public class SeanceController {
+
+    // 1. Définition des constantes pour éviter les duplications (Literals)
+    private static final String SEANCE_KEY = "seance";
+    private static final String WARNINGS_KEY = "warnings";
+    private static final String MESSAGE_KEY = "message";
+    private static final String ERREUR_LABEL = "Erreur";
 
     private final SeanceService seanceService;
     private final SeanceRepository seanceRepository;
@@ -30,8 +37,8 @@ public class SeanceController {
     }
 
     @GetMapping("/stats")
-    public ResponseEntity<java.util.Map<String, Object>> getStats() {
-        java.util.Map<String, Object> stats = new java.util.HashMap<>();
+    public ResponseEntity<Map<String, Object>> getStats() {
+        Map<String, Object> stats = new HashMap<>();
 
         long totalClasses = seanceService.countClasses();
         stats.put("totalClasses", totalClasses);
@@ -41,7 +48,7 @@ public class SeanceController {
             List<Map<String, Object>> salles = seanceService.getAllSalles();
             totalSalles = salles.size();
         } catch (Exception e) {
-            // Ignore if service is unavailable and return 0
+            // Ignore if service is unavailable
         }
         stats.put("totalSalles", totalSalles);
 
@@ -62,13 +69,9 @@ public class SeanceController {
         return ResponseEntity.ok(dtos);
     }
 
-    /**
-     * Endpoint appelé par Angular pour peupler le dropdown des salles.
-     * Appelle salles-materiels via RPC RabbitMQ en interne.
-     * GET /api/seances/salles
-     */
+    // 2. Remplacement de ResponseEntity<?> par ResponseEntity<Object>
     @GetMapping("/salles")
-    public ResponseEntity<?> getSalles() {
+    public ResponseEntity<Object> getSalles() {
         try {
             List<Map<String, Object>> salles = seanceService.getAllSalles();
             return ResponseEntity.ok(salles);
@@ -78,9 +81,6 @@ public class SeanceController {
         }
     }
 
-    /**
-     * GET /api/seances/salles/occupees?debut=...&fin=...&excludeId=...
-     */
     @GetMapping("/salles/occupees")
     public ResponseEntity<List<Integer>> getOccupiedSalles(
             @RequestParam("debut") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime debut,
@@ -95,9 +95,6 @@ public class SeanceController {
         return ResponseEntity.ok(occupiedIds);
     }
 
-    /**
-     * GET /api/seances/classes/occupees?debut=...&fin=...&excludeId=...
-     */
     @GetMapping("/classes/occupees")
     public ResponseEntity<List<Integer>> getOccupiedClasses(
             @RequestParam("debut") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime debut,
@@ -112,47 +109,42 @@ public class SeanceController {
         return ResponseEntity.ok(occupiedIds);
     }
 
-    /**
-     * POST /api/seances?classeId=3
-     * Vérifie automatiquement la disponibilité de la salle avant de sauvegarder.
-     */
     @PostMapping
-    public ResponseEntity<?> create(@RequestBody Seance seance,
-            @RequestParam(value = "classeId", required = false) Integer classeId) {
+    public ResponseEntity<Object> create(@RequestBody Seance seance,
+                                         @RequestParam(value = "classeId", required = false) Integer classeId) {
         try {
             Map<String, Object> result = seanceService.save(seance, classeId);
-            Seance saved = (Seance) result.get("seance");
+            Seance saved = (Seance) result.get(SEANCE_KEY);
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                    "seance", toResponse(saved),
-                    "warnings", result.getOrDefault("warnings", List.of())
+                    SEANCE_KEY, toResponse(saved),
+                    WARNINGS_KEY, result.getOrDefault(WARNINGS_KEY, List.of())
             ));
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur"));
+            String errorMsg = (e.getMessage() != null) ? e.getMessage() : ERREUR_LABEL;
+            return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, errorMsg));
         }
     }
 
-    /**
-     * PUT /api/seances/1?classeId=3
-     */
     @PutMapping("/{id}")
-    public ResponseEntity<?> update(@PathVariable("id") Integer id,
-            @RequestBody Seance seance,
-            @RequestParam(value = "classeId", required = false) Integer classeId) {
+    public ResponseEntity<Object> update(@PathVariable("id") Integer id,
+                                         @RequestBody Seance seance,
+                                         @RequestParam(value = "classeId", required = false) Integer classeId) {
         try {
             Map<String, Object> result = seanceService.update(id, seance, classeId);
-            Seance updated = (Seance) result.get("seance");
+            Seance updated = (Seance) result.get(SEANCE_KEY);
             return ResponseEntity.ok(Map.of(
-                    "seance", toResponse(updated),
-                    "warnings", result.getOrDefault("warnings", List.of())
+                    SEANCE_KEY, toResponse(updated),
+                    WARNINGS_KEY, result.getOrDefault(WARNINGS_KEY, List.of())
             ));
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur"));
+            String errorMsg = (e.getMessage() != null) ? e.getMessage() : ERREUR_LABEL;
+            return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, errorMsg));
         }
     }
 
     @PostMapping("/{seanceId}/classe/{classeId}")
     public ResponseEntity<Seance> assignerClasse(@PathVariable("seanceId") Integer seanceId,
-            @PathVariable("classeId") Integer classeId) {
+                                                 @PathVariable("classeId") Integer classeId) {
         try {
             Seance updated = seanceService.assignerClasse(seanceId, classeId);
             return ResponseEntity.ok(updated);
@@ -172,18 +164,19 @@ public class SeanceController {
     }
 
     @PostMapping("/planning/generate/{classeId}")
-    public ResponseEntity<?> generateWeeklyPlanning(@PathVariable("classeId") Integer classeId) {
+    public ResponseEntity<Object> generateWeeklyPlanning(@PathVariable("classeId") Integer classeId) {
         try {
             List<Seance> planning = seanceService.generateWeeklyPlanning(classeId);
             List<Map<String, Object>> dtos = planning.stream().map(this::toResponse).toList();
             return ResponseEntity.ok(dtos);
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur"));
+            String errorMsg = (e.getMessage() != null) ? e.getMessage() : ERREUR_LABEL;
+            return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, errorMsg));
         }
     }
 
     private Map<String, Object> toResponse(Seance s) {
-        Map<String, Object> response = new java.util.HashMap<>();
+        Map<String, Object> response = new HashMap<>();
         response.put("id", s.getId());
         response.put("dateDebut", s.getDateDebut());
         response.put("dateFin", s.getDateFin());
@@ -205,16 +198,19 @@ public class SeanceController {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, String>> handleBadRequest(HttpMessageNotReadableException e) {
-        String msg = e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage()
-                : "Corps de requête invalide (dateDebut, dateFin au format ISO, type: PRESENTIEL ou EN_LIGNE)";
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", msg));
+        // 3. Correction de la condition "Always True" en simplifiant l'accès au message
+        String msg = "Corps de requête invalide (dateDebut, dateFin au format ISO, type: PRESENTIEL ou EN_LIGNE)";
+        if (e.getMostSpecificCause() != null && e.getMostSpecificCause().getMessage() != null) {
+            msg = e.getMostSpecificCause().getMessage();
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(MESSAGE_KEY, msg));
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleException(Exception e) {
-        e.printStackTrace();
+        String errorMsg = (e.getMessage() != null) ? e.getMessage() : "Erreur serveur";
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Erreur serveur"));
+                .body(Map.of(MESSAGE_KEY, errorMsg));
     }
 }

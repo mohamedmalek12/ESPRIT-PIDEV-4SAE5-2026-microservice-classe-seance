@@ -161,4 +161,6 @@ class SeanceControllerTest {
                 .andExpect(jsonPath("$[0].id").value(10))
                 .andExpect(jsonPath("$[0].classeNom").value("ClasseA"));
     }
+    
+
 }
