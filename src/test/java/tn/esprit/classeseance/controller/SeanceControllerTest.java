@@ -12,7 +12,6 @@ import tn.esprit.classeseance.entity.TypeSeance;
 import tn.esprit.classeseance.service.SeanceService;
 import tn.esprit.classeseance.repository.SeanceRepository;
 
-import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
