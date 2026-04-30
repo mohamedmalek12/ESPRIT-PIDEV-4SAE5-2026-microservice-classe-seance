@@ -124,4 +124,89 @@ class SeanceServiceTest {
         assertEquals(classeValide, result.getClasse());
         verify(seanceRepository).save(seanceValide);
     }
+    @Test
+    void testFindAll() {
+        when(seanceRepository.findAll()).thenReturn(List.of(seanceValide));
+        List<Seance> result = seanceService.findAll();
+        assertEquals(1, result.size());
+        verify(seanceRepository).findAll();
+    }
+
+    @Test
+    void testCountClasses() {
+        when(classeRepository.count()).thenReturn(5L);
+        long count = seanceService.countClasses();
+        assertEquals(5L, count);
+    }
+
+    @Test
+    void testFindById() {
+        when(seanceRepository.findById(10)).thenReturn(Optional.of(seanceValide));
+        Optional<Seance> result = seanceService.findById(10);
+        assertTrue(result.isPresent());
+        assertEquals(10, result.get().getId());
+    }
+
+    @Test
+    void testFindByClasseId() {
+        when(seanceRepository.findByClasseId(1)).thenReturn(List.of(seanceValide));
+        List<Seance> result = seanceService.findByClasseId(1);
+        assertFalse(result.isEmpty());
+    }
+
+    @Test
+    void testDeleteById_Success() {
+        when(seanceRepository.existsById(10)).thenReturn(true);
+        assertDoesNotThrow(() -> seanceService.deleteById(10));
+        verify(seanceRepository).deleteById(10);
+    }
+
+    @Test
+    void testDeleteById_ThrowsException() {
+        when(seanceRepository.existsById(99)).thenReturn(false);
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> seanceService.deleteById(99));
+        assertTrue(ex.getMessage().contains("not found"));
+    }
+
+    @Test
+    void testUpdate_Success() {
+        // Arrange
+        when(seanceRepository.findById(10)).thenReturn(Optional.of(seanceValide));
+
+        Map<String, Object> rabbitResponse = Map.of("salle", Map.of("id", 100, "nom", "Salle A"));
+        when(rabbitTemplate.convertSendAndReceive(anyString(), anyString(), any(Object.class)))
+                .thenReturn(rabbitResponse);
+
+        when(seanceRepository.existsBySalleIdAndCreneauExcludingId(anyInt(), any(), any(), eq(10))).thenReturn(false);
+        when(classeRepository.findById(1)).thenReturn(Optional.of(classeValide));
+        when(seanceRepository.existsByClasseIdAndCreneauExcludingId(anyInt(), any(), any(), eq(10))).thenReturn(false);
+        when(seanceRepository.save(any(Seance.class))).thenReturn(seanceValide);
+
+        // Act
+        Map<String, Object> result = seanceService.update(10, seanceValide, 1);
+
+        // Assert
+        assertNotNull(result.get("seance"));
+        verify(seanceRepository).save(any(Seance.class));
+    }
+
+    @Test
+    void testGetSalleById_ReturnsNullWhenIdIsNull() {
+        Map<String, Object> result = seanceService.getSalleById(null);
+        assertNull(result);
+    }
+
+    @Test
+    void testGetRecentWarnings() {
+        when(warningEventRepository.findTop500ByOrderByTimestampDesc()).thenReturn(List.of());
+        List<Map<String, Object>> warnings = seanceService.getRecentWarnings();
+        assertTrue(warnings.isEmpty());
+    }
+
+    @Test
+    void testClearWarningsHistory() {
+        doNothing().when(warningEventRepository).deleteAllWarnings();
+        assertDoesNotThrow(() -> seanceService.clearWarningsHistory());
+        verify(warningEventRepository).deleteAllWarnings();
+    }
 }
