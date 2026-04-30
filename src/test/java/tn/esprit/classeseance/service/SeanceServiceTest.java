@@ -245,8 +245,8 @@ class SeanceServiceTest {
 
     @Test
     void testEnforceMaxStoredWarnings_OverLimit() {
-        // Simule une base de données avec trop d'avertissements (ex: 200)
-        when(warningEventRepository.count()).thenReturn(200L);
+        // CORRECTION 1 : On simule une base de données avec beaucoup d'avertissements (5000 au lieu de 200)
+        when(warningEventRepository.count()).thenReturn(5000L);
         when(warningEventRepository.findIdsOldestFirst(any())).thenReturn(List.of("id1", "id2", "id3"));
 
         seanceService.publishExternalWarnings(null, List.of("Nouvelle alerte"));
@@ -262,6 +262,9 @@ class SeanceServiceTest {
         when(rabbitTemplate.convertSendAndReceive(anyString(), anyString(), any(Object.class)))
                 .thenReturn(rabbitResponse);
         when(classeRepository.findById(1)).thenReturn(Optional.of(classeValide));
+
+        // CORRECTION 2 : On force le repository à bien retourner la séance au lieu de null !
+        when(seanceRepository.save(any(Seance.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // 1. Test de la ligne rouge : "startsBefore08"
         Seance earlySeance = new Seance();
