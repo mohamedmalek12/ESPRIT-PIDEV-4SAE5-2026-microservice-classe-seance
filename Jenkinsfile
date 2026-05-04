@@ -44,6 +44,18 @@ pipeline {
                 }
             }
         }
+        stage('🐳 Docker Build Verify') {
+                    steps {
+                        script {
+                            echo "Vérification de la création de l'image Docker pour Classe-Seance..."
+                            // On construit l'image avec un tag de test pour valider le Dockerfile
+                            sh "docker build -t ${IMAGE_NAME}:test ."
+
+                            echo "Nettoyage de l'image de test..."
+                            sh "docker rmi ${IMAGE_NAME}:test"
+                        }
+                    }
+                }
 
     }
 

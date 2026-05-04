@@ -1,9 +1,76 @@
+version: '3.8'
+
 services:
+  # --- INFRASTRUCTURE ---
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: jenkins
+    user: root
+    ports:
+      - "8081:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - devops-net
+
+  sonarqube:
+    image: sonarqube:community
+    container_name: sonarqube
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+    volumes:
+      - sonar_data:/opt/sonarqube/data
+    networks:
+      - devops-net
+
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
     ports:
       - "5672:5672"
       - "15672:15672"
+    networks:
+      - devops-net
+
+  # --- BASE DE DONNÉES ---
+  db-classe:
+    image: mysql:8.0
+    container_name: db-classe
+    ports:
+      - "3307:3306"
     environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: classe-seance
+    networks:
+      - devops-net
+
+  # --- APPLICATION (MICROSERVICE) ---
+  classe-seance-app:
+    build: .
+    container_name: classe-seance-app
+    ports:
+      - "8090:8090"
+    depends_on:
+      - db-classe
+      - rabbitmq
+    environment:
+      # Méthode 2 : On injecte les variables pour écraser le localhost du .properties
+      - SPRING_DATASOURCE_URL=jdbc:mysql://db-classe:3306/classe-seance?createDatabaseIfNotExist=true
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=root
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+    networks:
+      - devops-net
+
+networks:
+  devops-net:
+    driver: bridge
+
+volumes:
+  jenkins_home:
+  sonar_data:

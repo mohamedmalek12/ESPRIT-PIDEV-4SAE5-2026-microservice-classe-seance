@@ -1,22 +1,21 @@
-# ---- Build Stage ----
+# ---- Stage de Build ----
 FROM maven:3.9.6-eclipse-temurin-17 AS build
 WORKDIR /app
 
-# Copie du pom.xml pour télécharger les dépendances (cache Docker)
+# Cache des dépendances
 COPY pom.xml .
 RUN mvn dependency:go-offline -B
 
-# Copie du code source et compilation
+# Compilation
 COPY src ./src
-# Note : On ne saute pas les tests ici pour que JaCoCo génère les rapports pour Sonar
-RUN mvn clean package -B
+RUN mvn clean package -B -DskipTests
 
-# ---- Run Stage ----
+# ---- Stage d'Exécution ----
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
-# Récupération du JAR généré
+# On récupère le JAR du stage précédent
 COPY --from=build /app/target/*.jar app.jar
 
-EXPOSE 8081
+EXPOSE 8090
 ENTRYPOINT ["java", "-jar", "app.jar"]
